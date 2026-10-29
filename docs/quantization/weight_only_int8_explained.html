@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weight-only INT8 Quantization Explained (MiniMind)</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%231f7a6e'/%3E%3Cpath d='M4 16h16M7 16V9m5 7V6m5 10v-5' stroke='%23fff' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+:root{--ink:#1b232c;--muted:#5b6672;--paper:#f3f5f8;--card:#fff;--navy:#22304a;--teal:#1f7a6e;--teal-soft:#e3f1ee;--teal-line:#b6d9d2;
+--blue:#2f5fb0;--blue-soft:#e8effa;--blue-line:#c9daf2;--amber:#a8721a;--amber-soft:#f8efdb;--amber-line:#e8d4a8;--line:#e2e6ea;--code:#171d26}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.7;font-size:16px}
+.wrap{max-width:920px;margin:0 auto;padding:30px 18px 70px}
+h1{font-size:24px;color:var(--navy);margin:0 0 4px}
+.lead{color:var(--muted);margin:0 0 10px}
+h2{font-size:19px;margin:34px 0 10px;padding-top:14px;border-top:3px solid var(--navy);color:var(--navy)}
+h3{font-size:15.5px;margin:18px 0 6px;color:var(--navy)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:12px 0}
+code{background:#e9edf3;padding:1px 5px;border-radius:4px;font-size:12.5px;font-family:"SF Mono",Consolas,monospace}
+ul.tight{margin:6px 0;padding-left:22px}ul.tight li{margin:5px 0}
+.callout{border-radius:10px;padding:11px 15px;margin:12px 0;font-size:14px;border:1px solid}
+.key{background:var(--blue-soft);border-color:var(--blue-line);color:#1d3f73}
+.warn{background:var(--amber-soft);border-color:var(--amber-line);color:#755013}
+.ok{background:var(--teal-soft);border-color:var(--teal-line);color:#17594f}
+.callout .h{font-weight:800;display:block;margin-bottom:3px}
+table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13.2px}
+th,td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
+th{background:var(--blue-soft);color:var(--navy)}
+pre.code{background:var(--code);color:#e6e9e2;border-radius:10px;padding:14px 16px;overflow-x:auto;font-family:"SF Mono",Consolas,monospace;font-size:12.3px;line-height:1.6}
+.cm{color:#8a98a5;font-style:italic}.kw{color:#8fb6ef}.st{color:#a9d18e}.num{color:#d19a6b}
+.formula{background:#fbfcfe;border:1px solid var(--line);border-radius:10px;padding:12px 16px;font-family:"SF Mono",Consolas,monospace;font-size:13px;white-space:pre-wrap;margin:8px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Weight-only INT8 Quantization, Explained</h1>
+<p class="lead">A kernel-free approach that runs on Pascal GPUs and CPU. Built for MiniMind-O; benchmark script <code>bench_quant_omni.py</code>.</p>
+
+<h2>1. Why quantize?</h2>
+<div class="card">
+<p>Neural-network weights are normally stored as FP32 (4 bytes) or FP16/BF16 (2 bytes). Most of those bits are not needed for the model to behave correctly. Quantization maps weights to a low-bit integer type (here INT8, 1 byte), cutting storage and memory bandwidth roughly in half (vs FP16) or to a quarter (vs FP32).</p>
+<div class="callout key"><span class="h">Quantization does not change the parameter count</span>
+A 113M model stays a 113M model. Only the number of bytes per parameter changes. In this project the model size drops from about <b>452 MB (FP32) to 207 MB (INT8)</b>.</div>
+</div>
+
+<h2>2. Weight-only vs activation quantization</h2>
+<div class="card">
+<ul class="tight">
+<li><b>Weight-only (what we do)</b>: only weights are stored as INT8; activations stay in FP32. At the forward pass weights are de-quantized and a normal FP32 matmul runs. No special kernels, maximum compatibility.</li>
+<li><b>Full INT8 (weights + activations)</b>: requires INT8 Tensor Cores / kernels (e.g., via bitsandbytes, TensorRT, ONNX QLinearMatMul). Faster on supported hardware, but unavailable on Pascal (GTX1070, sm_61).</li>
+</ul>
+</div>
+
+<h2>3. Per-channel linear quantization (the math)</h2>
+<div class="card">
+<div class="formula">scale = max(|w|) / 127                      # one scale per output channel
+w_q   = clamp( round(w / scale), -127, 127 )  # integer weights actually stored
+w_hat = w_q * scale                           # de-quantized at the forward pass
+err   = w_hat - w                             # round-to-nearest error</div>
+<p>This is the simplest PTQ method, often called <b>RTN (round-to-nearest)</b> — no training, no calibration data. Per-channel scales keep large-magnitude channels from dominating the error.</p>
+</div>
+
+<h2>4. W8Linear: code with comments</h2>
+<pre class="code"><span class="kw">import</span> torch, torch.nn <span class="kw">as</span> nn
+
+<span class="kw">class</span> <span class="kw">W8Linear</span>(nn.Module):
+    <span class="cm"># Drop-in replacement for nn.Linear: int8 storage, FP32 compute.</span>
+    <span class="kw">def</span> <span class="kw">__init__</span>(self, linear: nn.Linear):
+        <span class="kw">super</span>().__init__()
+        w = linear.weight.data.float()
+        <span class="cm"># per-output-channel scale (symmetric, range -127..127)</span>
+        scale = w.abs().max(dim=1, keepdim=True).values / 127.0
+        wq = torch.clamp(torch.round(w / scale), -127, 127).to(torch.int8)
+        self.register_buffer(<span class="st">"w_q"</span>, wq)          <span class="cm"># 1 byte per weight</span>
+        self.register_buffer(<span class="st">"scale"</span>, scale)
+        self.bias = <span class="kw">None</span> <span class="kw">if</span> linear.bias <span class="kw">is</span> <span class="kw">None</span> \
+            <span class="kw">else</span> linear.bias.data.clone()
+
+    <span class="kw">def</span> <span class="kw">forward</span>(self, x):
+        w = self.w_q.float() * self.scale          <span class="cm"># de-quantize -> FP32</span>
+        <span class="kw">return</span> torch.nn.functional.linear(x, w, self.bias)</pre>
+
+<h2>5. Scope: blocks vs ffn</h2>
+<div class="card">
+<table>
+<tr><th>Scope</th><th>What is quantized</th><th>When to use</th></tr>
+<tr><td><code>blocks</code></td><td>Attention projections + FFN (maximum compression)</td><td>Default; gives the biggest size cut</td></tr>
+<tr><td><code>ffn</code></td><td>FFN / experts only; attention and output heads stay FP32</td><td>If <code>blocks</code> visibly degrades</td></tr>
+</table>
+<p>For MoE the <b>Router gates are always kept in FP32</b> — quantizing the small routing layer can destabilize expert selection.</p>
+</div>
+
+<h2>6. Real results</h2>
+<div class="card">
+<table>
+<tr><th>Metric</th><th>FP32</th><th>Weight-only INT8</th></tr>
+<tr><td>Model size</td><td>~452 MB</td><td><b>~207 MB</b></td></tr>
+<tr><td>Parameter count</td><td>113.13M</td><td>113.13M (unchanged)</td></tr>
+<tr><td>Peak memory</td><td>baseline</td><td>reduced</td></tr>
+<tr><td>Greedy answers</td><td>—</td><td>highly consistent (similarity &gt; 0.95 acceptable)</td></tr>
+</table>
+</div>
+
+<h2>7. PTQ / RTN / QAT, and when to escalate</h2>
+<div class="card">
+<ul class="tight">
+<li><b>PTQ (post-training)</b>: quantize after training. RTN is the simplest PTQ.</li>
+<li><b>QAT (quantization-aware training)</b>: insert fake-quant nodes during training so the model learns around quantization error. Higher accuracy, but requires retraining.</li>
+<li>If INT8 degrades on sensitive layers (attention / lm_head), either skip them (<code>ffn</code>), use mixed precision, or fall back to QAT.</li>
+</ul>
+<div class="callout warn"><span class="h">Quality gate</span>
+After quantizing, run the exact same evaluation as the FP model and compare. If accuracy drops beyond your threshold, revert. Do not deploy a quantized model just because it is smaller.</div>
+</div>
+
+<h2>8. Key terms</h2>
+<div class="card">
+<table>
+<tr><th>Term</th><th>Meaning</th></tr>
+<tr><td>PTQ / QAT</td><td>Post-training quantization / quantization-aware training</td></tr>
+<tr><td>RTN</td><td>Round-to-nearest: the simplest weight-only PTQ</td></tr>
+<tr><td>Per-channel scale</td><td>One quantization scale per output channel</td></tr>
+<tr><td>Weight-only</td><td>Quantize weights, keep activations in FP32</td></tr>
+<tr><td>De-quantization</td><td>w_hat = w_q · scale, done at the forward pass</td></tr>
+</table>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Knowledge Distillation Explained (MoE → Dense, MiniMind)</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%236d4aa8'/%3E%3Cpath d='M9 4v6m0 0L6 7m3 3 3-3M15 20v-6m0 0-3 3m3-3 3 3' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+:root{--ink:#1b232c;--muted:#5b6672;--paper:#f3f5f8;--card:#fff;--navy:#22304a;--purple:#6d4aa8;--purple-soft:#efe9f8;--purple-line:#d8c9ee;
+--blue:#2f5fb0;--blue-soft:#e8effa;--blue-line:#c9daf2;--amber:#a8721a;--amber-soft:#f8efdb;--amber-line:#e8d4a8;--green:#2e7d54;--green-soft:#e4f2ea;--green-line:#b9dcc8;--line:#e2e6ea;--code:#171d26}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.7;font-size:16px}
+.wrap{max-width:940px;margin:0 auto;padding:30px 18px 70px}
+h1{font-size:24px;color:var(--navy);margin:0 0 4px}
+.lead{color:var(--muted);margin:0 0 10px}
+h2{font-size:19px;margin:34px 0 10px;padding-top:14px;border-top:3px solid var(--navy);color:var(--navy)}
+h3{font-size:15.5px;margin:18px 0 6px;color:var(--navy)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:12px 0}
+code{background:#e9edf3;padding:1px 5px;border-radius:4px;font-size:12.5px;font-family:"SF Mono",Consolas,monospace}
+ul.tight{margin:6px 0;padding-left:22px}ul.tight li{margin:5px 0}
+.callout{border-radius:10px;padding:11px 15px;margin:12px 0;font-size:14px;border:1px solid}
+.key{background:var(--blue-soft);border-color:var(--blue-line);color:#1d3f73}
+.warn{background:var(--amber-soft);border-color:var(--amber-line);color:#755013}
+.ok{background:var(--green-soft);border-color:var(--green-line);color:#1e5b3c}
+.vi{background:var(--purple-soft);border-color:var(--purple-line);color:#4a2f78}
+.callout .h{font-weight:800;display:block;margin-bottom:3px}
+table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13.2px}
+th,td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
+th{background:var(--blue-soft);color:var(--navy)}
+pre.code{background:var(--code);color:#e6e9e2;border-radius:10px;padding:14px 16px;overflow-x:auto;font-family:"SF Mono",Consolas,monospace;font-size:12.3px;line-height:1.6}
+.cm{color:#8a98a5;font-style:italic}.kw{color:#8fb6ef}.st{color:#a9d18e}.num{color:#d19a6b}
+.formula{background:#fbfcfe;border:1px solid var(--line);border-radius:10px;padding:12px 16px;font-family:"SF Mono",Consolas,monospace;font-size:13px;white-space:pre-wrap;margin:8px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Knowledge Distillation, Explained</h1>
+<p class="lead">MoE teacher 315M → Dense student 113M. Sequence-level and logit-level KD on MiniMind-O, with real data.</p>
+
+<h2>1. What is knowledge distillation?</h2>
+<div class="card">
+<p>Knowledge distillation (KD) transfers capability from a large <b>teacher</b> to a small <b>student</b>. There are three levels:</p>
+<table>
+<tr><th>Level</th><th>Teacher target</th><th>When</th></tr>
+<tr><td>Sequence / response</td><td>Final text (one-hot hard labels)</td><td>Deterministic tasks with a known answer</td></tr>
+<tr><td><b>Logit</b></td><td>Per-position distribution over the whole vocab</td><td>Open / style tasks; "dark knowledge"</td></tr>
+<tr><td>Feature</td><td>Intermediate hidden states</td><td>Same-shaped models (or a projection)</td></tr>
+</table>
+<div class="callout vi"><span class="h">KD does not change model size</span>
+The 315M → 113M reduction comes from <b>architecture choice</b> (MoE 4 experts → Dense 1 FFN). KD only moves the capability; it does not shrink parameters.</div>
+</div>
+
+<h2>2. Hard vs soft labels, temperature, dark knowledge</h2>
+<div class="card">
+<ul class="tight">
+<li><b>Hard label</b>: one-hot — correct token = 1, all others = 0. Trained with cross-entropy.</li>
+<li><b>Soft label</b>: the teacher's full probability distribution, including non-zero mass on plausible alternatives.</li>
+<li><b>Temperature T</b>: <code>softmax(z/T)</code>. Higher T flattens the distribution and reveals the relative mass of near-misses (T = 2..4).</li>
+<li><b>Dark knowledge</b>: the information carried by the probabilities of <i>wrong</i> answers — e.g., after "Why", the next word should be a question auxiliary, not any random token.</li>
+</ul>
+<div class="callout key"><span class="h">Real example — "Tell me a joke" → "Why" → next token</span>
+At T=4 the teacher gives a cluster: don 0.0178, did 0.0152, do 0.0077, was 0.0069, have/does/can/is/are/could 0.003..0.005. A hard label only says "did". The soft label teaches the whole auxiliary-verb cluster and its ranking.</div>
+</div>
+
+<h2>3. The loss (and why T²)</h2>
+<div class="card">
+<div class="formula">p_t = softmax(z_t / T)          # teacher soft target
+p_s = softmax(z_s / T)          # student soft distribution
+L = α · T² · KL(p_t ‖ p_s) + (1 − α) · CE(y, softmax(z_s))</div>
+<p>Dividing by T shrinks the softmax gradient by about 1/T². Multiplying the KL term by <b>T²</b> restores the scale so the soft and hard terms are comparable (Hinton).</p>
+</div>
+
+<h2>4. Why MoE and Dense can distill together</h2>
+<div class="card">
+<p>Logit KD does not require matching internals — only matching outputs. Both <code>lm_head</code> layers are <b>768 → 6400</b> over the same tokenizer, so column j is the same word in both. The internal 4-expert MoE vs 1-FFN Dense is irrelevant to the alignment.</p>
+<div class="formula">h_t, _, _ = teacher.thinker(x)          # teacher internals
+z_t = teacher.lm_head(h_t)              # [B, T, 6400]
+h_s, _, _ = student.thinker(x)          # student internals
+z_s = student.lm_head(h_s)              # [B, T, 6400]  -> same shape</div>
+</div>
+
+<h2>5. Online teacher + training loop (comments)</h2>
+<pre class="code"><span class="kw">import</span> torch, torch.nn.functional <span class="kw">as</span> F
+
+<span class="kw">def</span> <span class="kw">kd_step</span>(batch, teacher, student, T=4.0, alpha=0.3):
+    teacher.eval()
+    <span class="kw">with</span> torch.no_grad():
+        zt = teacher.lm_head(teacher.thinker(batch.x)[0]).detach().float()
+        pt = torch.softmax(zt / T, dim=-1)          <span class="cm"># soft target</span>
+    zs = student.lm_head(student.thinker(batch.x)[0]).float()
+    <span class="cm"># soft KL, teacher as target (answer positions only; mask uses y != -100)</span>
+    log_ps = F.log_softmax(zs / T, dim=-1)
+    kl = F.kl_div(log_ps, pt, reduction=<span class="st">"none"</span>).sum(-1)
+    kl = (kl * batch.mask).sum() / batch.mask.sum()
+    ce = F.cross_entropy(zs.transpose(1, 2), batch.y, ignore_index=-100)
+    loss = alpha * (T * T) * kl + (1 - alpha) * ce   <span class="cm"># T² compensation</span>
+    loss.backward()
+    <span class="kw">return</span> loss, kl, ce
+<span class="cm"># Only student.thinker is in the optimizer; teacher is frozen.</span></pre>
+
+<h2>6. Real results</h2>
+<div class="card">
+<h3>Intent accuracy (15 lamp intents, 53 held-out questions)</h3>
+<table>
+<tr><th>Approach</th><th>Data</th><th>Accuracy</th></tr>
+<tr><td>Untrained base</td><td>—</td><td>22.6%</td></tr>
+<tr><td>Hard labels</td><td>98</td><td>56.6%</td></tr>
+<tr><td><b>Hard labels (final)</b></td><td><b>211</b></td><td><b>75.5%</b></td></tr>
+<tr><td>Logit soft (T=4, α=0.3)</td><td>211</td><td>64.2%</td></tr>
+</table>
+<h3>Per-position KL (T=4; lower = more like teacher)</h3>
+<table>
+<tr><th>Example</th><th>Before</th><th>After</th></tr>
+<tr><td>"Turn on the light" (on)</td><td>0.2774</td><td><b>0.1017</b></td></tr>
+<tr><td>"Thank you" ('re)</td><td>0.3240</td><td><b>0.1779</b></td></tr>
+<tr><td>"Tell me a joke" (did)</td><td>0.4058</td><td><b>0.2598</b></td></tr>
+</table>
+<h3>Actual generation</h3>
+<table>
+<tr><th>Input</th><th>Model</th><th>Output</th></tr>
+<tr><td>"Turn on the light."</td><td>Teacher (free)</td><td>Hedges: "It seems like… / Could you clarify…"</td></tr>
+<tr><td>"Turn on the light."</td><td>Distilled student</td><td>"Sure, I'll turn on the light."</td></tr>
+<tr><td>"Tell me a joke."</td><td>Teacher / base</td><td>"Why don't scientists trust atoms? Because they make up everything!"</td></tr>
+<tr><td>"Tell me a joke."</td><td>Hard-template student</td><td>"Sure, here's a light-hearted joke."</td></tr>
+</table>
+</div>
+
+<h2>7. The key lesson: hard for commands, soft for chat</h2>
+<div class="card">
+<div class="callout warn"><span class="h">Teacher ceiling</span>
+The MoE teacher hedges on commands during free generation, so soft labels conflict with hard templates there (soft KL stalls around 1.7; command accuracy drops to 64.2%). Under teacher forcing it is correct at mid-span positions — the evasion happens only at the free-generation opening.</div>
+<div class="callout ok"><span class="h">Per-domain strategy</span>
+Deterministic commands: hard labels, α ≈ 0 (75.5%). Open chat / jokes: soft labels, α ≈ 0.7. Always evaluate the teacher on your task before trusting its soft targets.</div>
+</div>
+
+<h2>8. Inference: autoregressive with KV cache</h2>
+<div class="card">
+<div class="formula">prompt → apply_chat_template → model.generate
+loop: argmax next token → append it (KV cache) → until EOS
+decode → answer</div>
+<p>Training is teacher-forced (whole answer in, one parallel pass). Inference is autoregressive (one token at a time, no loss, no backward). Greedy (temperature=0) is deterministic and fits command control.</p>
+</div>
+
+<h2>9. Key terms</h2>
+<div class="card">
+<table>
+<tr><th>Term</th><th>Meaning</th></tr>
+<tr><td>Teacher / Student</td><td>Frozen source model / trained target model</td></tr>
+<tr><td>Logits</td><td>Unnormalized scores, length = vocab (6400)</td></tr>
+<tr><td>Hard / soft label</td><td>One-hot target / teacher distribution</td></tr>
+<tr><td>Dark knowledge</td><td>Relative probabilities of wrong answers</td></tr>
+<tr><td>Temperature T</td><td>Softens the distribution; reveals dark knowledge</td></tr>
+<tr><td>α</td><td>Weight of the soft KL term</td></tr>
+<tr><td>KL divergence</td><td>Distance between teacher and student distributions</td></tr>
+<tr><td>Teacher forcing</td><td>Feeding the full answer during training</td></tr>
+<tr><td>KV cache</td><td>Cached attention keys/values for fast decoding</td></tr>
+</table>
+</div>
+</div>
+</body>
+</html>

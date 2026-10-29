@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Model weights & checkpoints (GitHub blocks files > 100 MB; use the Google Drive link in the README)
+*.pth
+*.pt
+*.safetensors
+*.bin
+
+# Run artifacts (generated locally, not committed)
+kd_dense*/
+quant_report*
+kd_dump_logits*
+kd_sft.jsonl
+kd_sft_lamp.jsonl
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

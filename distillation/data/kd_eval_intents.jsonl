@@ -1,0 +1,53 @@
+{"prompt": "Give me some light, please.", "intent": "turn_on"}
+{"prompt": "Light the room for me.", "intent": "turn_on"}
+{"prompt": "Could you turn the lamp on?", "intent": "turn_on"}
+{"prompt": "Please illuminate the desk.", "intent": "turn_on"}
+{"prompt": "Lights on, would you?", "intent": "turn_on"}
+{"prompt": "Kill the lights for me.", "intent": "turn_off"}
+{"prompt": "Please turn the lamp off now.", "intent": "turn_off"}
+{"prompt": "Could you shut the light off?", "intent": "turn_off"}
+{"prompt": "No more light, thanks.", "intent": "turn_off"}
+{"prompt": "Darkness, please, turn it off.", "intent": "turn_off"}
+{"prompt": "I need it brighter over here.", "intent": "brighter"}
+{"prompt": "Turn the lamp up a little.", "intent": "brighter"}
+{"prompt": "Can you increase the light?", "intent": "brighter"}
+{"prompt": "More brightness on the desk.", "intent": "brighter"}
+{"prompt": "Lower the light a little.", "intent": "dimmer"}
+{"prompt": "Can you reduce the brightness?", "intent": "dimmer"}
+{"prompt": "Make it less bright, please.", "intent": "dimmer"}
+{"prompt": "Ease the light down a bit.", "intent": "dimmer"}
+{"prompt": "Give me a warmer tone.", "intent": "scene_warm"}
+{"prompt": "Change to a cozy light.", "intent": "scene_warm"}
+{"prompt": "Set the color to warm.", "intent": "scene_warm"}
+{"prompt": "Make the light warmer, please.", "intent": "scene_warm"}
+{"prompt": "Tip your head to show you're listening.", "intent": "nod"}
+{"prompt": "A quick nod would be nice.", "intent": "nod"}
+{"prompt": "Can you give me a nod?", "intent": "nod"}
+{"prompt": "That's enough, stop now.", "intent": "stop"}
+{"prompt": "Halt, please.", "intent": "stop"}
+{"prompt": "Stop right there.", "intent": "stop"}
+{"prompt": "What did you just say?", "intent": "repeat"}
+{"prompt": "Come again?", "intent": "repeat"}
+{"prompt": "Say that once more, please.", "intent": "repeat"}
+{"prompt": "More slowly, please.", "intent": "speak_slower"}
+{"prompt": "I can't follow, slow down.", "intent": "speak_slower"}
+{"prompt": "Take your time and speak.", "intent": "speak_slower"}
+{"prompt": "I can barely hear you.", "intent": "speak_louder"}
+{"prompt": "A bit louder, please.", "intent": "speak_louder"}
+{"prompt": "Raise your voice a little.", "intent": "speak_louder"}
+{"prompt": "What's the forecast for tomorrow?", "intent": "refuse"}
+{"prompt": "Can you play a song for me?", "intent": "refuse"}
+{"prompt": "Set a timer for ten minutes.", "intent": "refuse"}
+{"prompt": "What's 7 times 8?", "intent": "refuse"}
+{"prompt": "Who are you?", "intent": "identity"}
+{"prompt": "Tell me what you can do.", "intent": "identity"}
+{"prompt": "What's your purpose?", "intent": "identity"}
+{"prompt": "Good afternoon.", "intent": "greeting"}
+{"prompt": "Hey there.", "intent": "greeting"}
+{"prompt": "Good to see you.", "intent": "greeting"}
+{"prompt": "Appreciate it.", "intent": "thanks"}
+{"prompt": "Thanks so much.", "intent": "thanks"}
+{"prompt": "Cheers, mate.", "intent": "thanks"}
+{"prompt": "Good night.", "intent": "goodbye"}
+{"prompt": "I'm off now, bye.", "intent": "goodbye"}
+{"prompt": "Talk to you later.", "intent": "goodbye"}
